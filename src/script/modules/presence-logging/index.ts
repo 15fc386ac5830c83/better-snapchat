@@ -130,6 +130,7 @@ function sendDiscordWebhook({
 }
 
 const userPresenceMap: Map<string, PresenceState> = new Map();
+const userPresenceTracking: Map<string, boolean> = new Map(); // Track if user was previously present
 const serializeUserConversationId = (userId: string, conversationId?: string) =>
   `${userId}:${conversationId ?? 'direct'}`;
 
@@ -139,10 +140,57 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
 
   const currentlyPeekingUsers = new Set<string>();
   const currentlyTypingOrIdleUsers = new Set<string>();
+  const currentlyPresentUsers = new Set<string>(); // Track all users who are present
 
-  for (const [conversationId, { peekingParticipants, typingParticipants }] of activeConversationInfo.entries()) {
+  for (const [
+    conversationId,
+    { peekingParticipants, typingParticipants, presentParticipants },
+  ] of activeConversationInfo.entries()) {
     const conversation = getConversation(conversationId)?.conversation;
     const conversationTitle = conversation?.title ?? 'your Chat';
+
+    // Track all currently present users from presentParticipants
+    const currentPresentUserIds = new Set<string>();
+    if (presentParticipants && Array.isArray(presentParticipants)) {
+      for (const userId of presentParticipants) {
+        currentPresentUserIds.add(userId);
+        const serializedId = serializeUserConversationId(userId, conversationId);
+        currentlyPresentUsers.add(serializedId);
+      }
+    }
+
+    // Check for users who just joined (in presentParticipants but not previously tracked)
+    if (presentParticipants && Array.isArray(presentParticipants)) {
+      for (const userId of presentParticipants) {
+        const serializedId = serializeUserConversationId(userId, conversationId);
+        const wasPreviouslyPresent = userPresenceTracking.get(serializedId);
+        const isPeeking = peekingParticipants.includes(userId);
+        const isTyping = typingParticipants.some((tp: any) => tp.userId === userId);
+
+        // Only log "joined" and mark as present if user is not actively typing or peeking (just presence)
+        // and they weren't previously tracked
+        if (!wasPreviouslyPresent && !isPeeking && !isTyping) {
+          userPresenceTracking.set(serializedId, true);
+
+          if (presenceLoggingEnabled) {
+            const user = await getSnapchatPublicUser(userId);
+            const action = PresenceActionMap[PresenceState.JOINED](conversationTitle);
+            const timestamp = getTimestamp();
+            logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+
+            sendDiscordWebhook({
+              user,
+              conversation,
+              conversationId,
+              presenceState: PresenceState.JOINED,
+            });
+          }
+        } else if (!wasPreviouslyPresent && !isPeeking) {
+          // Mark as present if they're typing (but not peeking) to track for leave detection
+          userPresenceTracking.set(serializedId, true);
+        }
+      }
+    }
 
     for (const userId of peekingParticipants) {
       const user = await getSnapchatPublicUser(userId);
@@ -151,6 +199,7 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
       const previousState = userPresenceMap.get(serializedId);
 
       currentlyPeekingUsers.add(serializedId);
+      // Don't mark peeking users as present - they're not actually in the chat
 
       if (previousState === PresenceState.PEEKING) {
         continue;
@@ -160,7 +209,7 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
         const action = PresenceActionMap[PresenceState.PEEKING](conversationTitle);
         const timestamp = getTimestamp();
         logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
-        
+
         sendDiscordWebhook({
           user,
           conversation,
@@ -189,6 +238,11 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
       const previousState = userPresenceMap.get(serializedId);
 
       currentlyTypingOrIdleUsers.add(serializedId);
+      // Only mark as present if they're in presentParticipants (not just peeking)
+      const isInPresentParticipants = presentParticipants && presentParticipants.includes(userId);
+      if (isInPresentParticipants && !userPresenceTracking.get(serializedId)) {
+        userPresenceTracking.set(serializedId, true);
+      }
 
       if (previousState === presenceState) {
         continue;
@@ -198,7 +252,7 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
         const action = PresenceActionMap[presenceState](conversationTitle);
         const timestamp = getTimestamp();
         logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
-        
+
         sendDiscordWebhook({
           user,
           conversation,
@@ -208,6 +262,40 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
       }
 
       userPresenceMap.set(serializedId, presenceState);
+    }
+  }
+
+  // Check for users who left (were present but are no longer in presentParticipants)
+  for (const [serializedId, wasPresent] of userPresenceTracking.entries()) {
+    if (wasPresent && !currentlyPresentUsers.has(serializedId)) {
+      // Don't log "left" if user is currently peeking
+      if (currentlyPeekingUsers.has(serializedId)) {
+        continue;
+      }
+
+      // User left
+      userPresenceTracking.delete(serializedId);
+
+      if (presenceLoggingEnabled) {
+        const parts = serializedId.split(':');
+        if (parts[0] && parts[1]) {
+          const userId = parts[0];
+          const conversationId = parts[1] === 'direct' ? undefined : parts[1];
+          const user = await getSnapchatPublicUser(userId);
+          const conversation = conversationId ? getConversation(conversationId)?.conversation : null;
+          const conversationTitle = conversation?.title ?? 'your Chat';
+          const action = PresenceActionMap[PresenceState.LEFT](conversationTitle);
+          const timestamp = getTimestamp();
+          logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+
+          sendDiscordWebhook({
+            user,
+            conversation,
+            conversationId,
+            presenceState: PresenceState.LEFT,
+          });
+        }
+      }
     }
   }
 
@@ -266,6 +354,7 @@ class PresenceLogging extends Module {
       changedValues.onActiveConversationInfoUpdated = oldOnActiveConversationInfoUpdated;
       oldOnActiveConversationInfoUpdated = null;
       userPresenceMap.clear();
+      userPresenceTracking.clear();
     }
 
     if (Object.keys(changedValues).length === 0) {
