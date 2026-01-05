@@ -4,6 +4,11 @@ import { getConversation, getSnapchatPublicUser, getSnapchatStore } from '../../
 import { logInfo } from '../../lib/debug';
 import { PresenceActionMap, PresenceState } from '../../lib/constants';
 
+function getTimestamp(): string {
+  const now = new Date();
+  return now.toLocaleString();
+}
+
 const store = getSnapchatStore();
 
 let oldOnActiveConversationInfoUpdated: any = null;
@@ -70,6 +75,60 @@ function sendPresenceNotification({
   return notification;
 }
 
+function sendDiscordWebhook({
+  user,
+  presenceState,
+  conversation,
+  conversationId,
+}: {
+  user: any;
+  presenceState: PresenceState;
+  conversation: any;
+  conversationId?: string;
+}) {
+  const discordWebhookUrl = settings.getSetting('PRESENCE_LOGGING_DISCORD_WEBHOOK_URL');
+  if (!discordWebhookUrl) {
+    return;
+  }
+
+  const {
+    username,
+    bitmoji_avatar_id: bitmojiAvatarId,
+    bitmoji_selfie_id: bitmojiSelfieId,
+    display_name: displayName,
+  } = user;
+  const conversationTitle = conversation?.title ?? 'your Chat';
+  const action = PresenceActionMap[presenceState](conversationTitle);
+  const timestamp = getTimestamp();
+
+  let iconUrl = undefined;
+  if (bitmojiSelfieId != null && bitmojiAvatarId != null) {
+    iconUrl = `https://sdk.bitmoji.com/render/panel/${bitmojiSelfieId}-${bitmojiAvatarId}-v1.webp?transparent=1&trim=circle&scale=1`;
+  } else if (bitmojiAvatarId != null) {
+    iconUrl = `https://sdk.bitmoji.com/render/panel/${bitmojiAvatarId}-v1.webp?transparent=1&trim=circle&scale=1`;
+  }
+
+  const requestId = Math.random().toString(36).substring(7);
+
+  window.postMessage(
+    {
+      type: 'BETTERSNAP_TO_BACKGROUND',
+      requestId,
+      payload: {
+        type: 'SEND_DISCORD_WEBHOOK',
+        data: {
+          webhookUrl: discordWebhookUrl,
+          username: displayName ?? username,
+          content: action,
+          iconUrl: iconUrl,
+          timestamp: timestamp,
+        },
+      },
+    },
+    '*',
+  );
+}
+
 const userPresenceMap: Map<string, PresenceState> = new Map();
 const serializeUserConversationId = (userId: string, conversationId?: string) =>
   `${userId}:${conversationId ?? 'direct'}`;
@@ -99,7 +158,15 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
 
       if (presenceLoggingEnabled) {
         const action = PresenceActionMap[PresenceState.PEEKING](conversationTitle);
-        logInfo(`${user.display_name ?? user.username}:`, action);
+        const timestamp = getTimestamp();
+        logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+        
+        sendDiscordWebhook({
+          user,
+          conversation,
+          conversationId,
+          presenceState: PresenceState.PEEKING,
+        });
       }
 
       if (halfSwipeNotificationEnabled) {
@@ -129,7 +196,15 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
 
       if (presenceLoggingEnabled) {
         const action = PresenceActionMap[presenceState](conversationTitle);
-        logInfo(`${user.display_name ?? user.username}:`, action);
+        const timestamp = getTimestamp();
+        logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+        
+        sendDiscordWebhook({
+          user,
+          conversation,
+          conversationId,
+          presenceState,
+        });
       }
 
       userPresenceMap.set(serializedId, presenceState);
@@ -160,6 +235,7 @@ class PresenceLogging extends Module {
     store.subscribe((storeState: any) => storeState.presence, this.load);
     settings.on('PRESENCE_LOGGING.setting:update', () => this.load());
     settings.on('HALF_SWIPE_NOTIFICATION.setting:update', () => this.load());
+    settings.on('PRESENCE_LOGGING_DISCORD_WEBHOOK_URL.setting:update', () => this.load());
   }
 
   load(presenceClient?: any) {

@@ -41,6 +41,7 @@ export const SettingIds = {
   OPEN_CHAT_NOTIFICATION: 'OPEN_CHAT_NOTIFICATION',
   CHAT_HANDLING: 'CHAT_HANDLING',
   PRESENCE_LOGGING: 'PRESENCE_LOGGING',
+  PRESENCE_LOGGING_DISCORD_WEBHOOK_URL: 'PRESENCE_LOGGING_DISCORD_WEBHOOK_URL',
 } as const;
 
 export enum BitmojiPresence {
@@ -89,6 +90,7 @@ export const defaultSettingValues = {
   [SettingIds.BITMOJI_PRESENCE]: BitmojiPresence.DEFAULT,
   [SettingIds.CHAT_HANDLING]: ChatHandling.DEFAULT,
   [SettingIds.PRESENCE_LOGGING]: false,
+  [SettingIds.PRESENCE_LOGGING_DISCORD_WEBHOOK_URL]: '',
 };
 
 export type SettingId = keyof typeof SettingIds;
