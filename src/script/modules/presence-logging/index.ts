@@ -1,7 +1,7 @@
 import settings from '../../lib/settings';
 import Module from '../../lib/module';
 import { getConversation, getSnapchatPublicUser, getSnapchatStore } from '../../utils/snapchat';
-import { logInfo } from '../../lib/debug';
+import { logInfo, logRawEvent } from '../../lib/debug';
 import { PresenceActionMap, PresenceState } from '../../lib/constants';
 
 function getTimestamp(): string {
@@ -135,6 +135,8 @@ const serializeUserConversationId = (userId: string, conversationId?: string) =>
   `${userId}:${conversationId ?? 'direct'}`;
 
 async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any) {
+  logRawEvent('onActiveConversationInfoUpdated', activeConversationInfo);
+
   const halfSwipeNotificationEnabled = settings.getSetting('HALF_SWIPE_NOTIFICATION');
   const presenceLoggingEnabled = settings.getSetting('PRESENCE_LOGGING');
 

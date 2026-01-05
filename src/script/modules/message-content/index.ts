@@ -1,6 +1,7 @@
 import settings from '../../lib/settings';
 import Module from '../../lib/module';
 import { getSnapchatStore } from '../../utils/snapchat';
+import { logRawEvent } from '../../lib/debug';
 
 const store = getSnapchatStore();
 
@@ -23,6 +24,7 @@ function patchSendMessageWithContent(mananger: any) {
       return new Proxy(target[prop], {
         apply(targetFunc, thisArg, args) {
           const [, message] = args;
+          logRawEvent('sendMessageWithContent', { args, message });
 
           if (settings.getSetting('UPLOAD_SNAPS') && message.contentType === 3) {
             message.contentType = 1;
