@@ -3,17 +3,17 @@
   "version": "1.5.1",
   "description": "Screenshot Freely, Save Media, Bypass Presence Detection and more! Previously known as Better Snapchat.",
   "scripts": {
-    "start": "rm -rf ./public/build/ && node ./scripts/dev.js",
+    "start": "node ./scripts/dev.js",
     "build": "npm run build:chrome",
     "manifest-lint": "addons-linter public/",
     "lint": "eslint --ignore-pattern \"src/**/*.{ts,tsx}\" && prettier --check \"src/**/*.{ts,tsx}\"",
     "lint:fix": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "build:chrome": "rm -rf ./public/build/ && node ./scripts/chrome.js",
-    "build:firefox": "rm -rf ./public/build/ && node ./scripts/firefox.js",
-    "build:userscript": "rm -rf ./public/build/ && node ./scripts/userscript.js",
+    "build:chrome": "node ./scripts/chrome.js",
+    "build:firefox": "node ./scripts/firefox.js",
+    "build:userscript": "node ./scripts/userscript.js",
     "package": "npm run package:chrome",
-    "package:chrome": "rm -rf ./public/build/ && npm run build:chrome && cross-zip ./public better-snapchat-chrome-v%npm_package_version%.zip",
-    "package:firefox": "rm -rf ./public/build/ && npm run build:firefox && cross-zip ./public better-snapchat-firefox-v%npm_package_version%.zip"
+    "package:chrome": "npm run build:chrome && cross-zip ./public better-snapchat-chrome-v%npm_package_version%.zip",
+    "package:firefox": "npm run build:firefox && cross-zip ./public better-snapchat-firefox-v%npm_package_version%.zip"
   },
   "repository": {
     "type": "git",
