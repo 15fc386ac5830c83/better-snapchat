@@ -6,7 +6,19 @@ import { PresenceActionMap, PresenceState } from '../../lib/constants';
 
 function getTimestamp(): string {
   const now = new Date();
-  return now.toLocaleString();
+  return now.toLocaleString('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
+function getTimestampISO(): string {
+  return new Date().toISOString();
 }
 
 const store = getSnapchatStore();
@@ -100,6 +112,7 @@ function sendDiscordWebhook({
   const conversationTitle = conversation?.title ?? 'your Chat';
   const action = PresenceActionMap[presenceState](conversationTitle);
   const timestamp = getTimestamp();
+  const timestampISO = getTimestampISO();
 
   let iconUrl = undefined;
   if (bitmojiSelfieId != null && bitmojiAvatarId != null) {
@@ -122,6 +135,7 @@ function sendDiscordWebhook({
           content: action,
           iconUrl: iconUrl,
           timestamp: timestamp,
+          timestampISO: timestampISO,
         },
       },
     },
