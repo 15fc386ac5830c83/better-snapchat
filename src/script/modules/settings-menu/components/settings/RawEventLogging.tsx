@@ -15,4 +15,3 @@ export default {
   description: DESCRIPTION,
   component: RawEventLogging,
 };
-

@@ -86,7 +86,7 @@ export function logRawEvent(eventName: string, payload: any) {
     console.group(`%c${DEBUG_PREFIX} ${eventName}`, 'color: #ff6b6b; font-weight: bold');
     console.log(`%cTimestamp:`, 'color: #868e96', timestamp);
     console.log(`%cPayload:`, 'color: #868e96', payload);
-    
+
     // Serialize for display
     let serializedPayload: string;
     try {
@@ -104,7 +104,7 @@ export function logRawEvent(eventName: string, payload: any) {
     } catch {
       serializedPayload = String(payload);
     }
-    
+
     console.log(`%cPayload (JSON):`, 'color: #868e96', serializedPayload);
     console.groupEnd();
   } catch (error) {
