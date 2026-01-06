@@ -87,25 +87,6 @@ export function logRawEvent(eventName: string, payload: any) {
     console.log(`%cTimestamp:`, 'color: #868e96', timestamp);
     console.log(`%cPayload:`, 'color: #868e96', payload);
 
-    // Serialize for display
-    let serializedPayload: string;
-    try {
-      if (payload instanceof Map) {
-        const obj: any = {};
-        for (const [key, value] of payload.entries()) {
-          obj[key] = value;
-        }
-        serializedPayload = JSON.stringify(obj, null, 2);
-      } else if (payload instanceof Set) {
-        serializedPayload = JSON.stringify(Array.from(payload), null, 2);
-      } else {
-        serializedPayload = JSON.stringify(payload, null, 2);
-      }
-    } catch {
-      serializedPayload = String(payload);
-    }
-
-    console.log(`%cPayload (JSON):`, 'color: #868e96', serializedPayload);
     console.groupEnd();
   } catch (error) {
     console.error(`${DEBUG_PREFIX} Error logging raw event:`, error);
