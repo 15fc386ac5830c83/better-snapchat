@@ -3,11 +3,61 @@ import ReconnectingWebsocket from 'reconnecting-websocket';
 
 const PORT = process.env.HMR_PORT ?? 9292;
 
+// Rate limiting for Discord webhooks (30 requests per minute = 1 every 2 seconds)
+const webhookQueue: Array<{
+  webhookUrl: string;
+  payload: any;
+  resolve: (value: any) => void;
+  reject: (error: any) => void;
+}> = [];
+let isProcessingQueue = false;
+const WEBHOOK_THROTTLE_MS = 2000; // 2 seconds between requests
+
+async function processWebhookQueue() {
+  if (isProcessingQueue || webhookQueue.length === 0) {
+    return;
+  }
+
+  isProcessingQueue = true;
+
+  while (webhookQueue.length > 0) {
+    const { webhookUrl, payload, resolve, reject } = webhookQueue.shift()!;
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        console.log('Discord webhook sent successfully');
+        resolve({ success: true, status: response.status });
+      } else {
+        console.error('Failed to send Discord webhook:', response.status, response.statusText);
+        reject({ success: false, error: `HTTP ${response.status}: ${response.statusText}` });
+      }
+    } catch (error: any) {
+      console.error('Failed to send Discord webhook:', error);
+      reject({ success: false, error: error.message });
+    }
+
+    // Throttle: wait before processing next webhook (unless queue is empty)
+    if (webhookQueue.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, WEBHOOK_THROTTLE_MS));
+    }
+  }
+
+  isProcessingQueue = false;
+}
+
 // Handle ntfy notifications
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'SEND_NTFY_NOTIFICATION') {
     const { topic, title, body, iconUrl, clickUrl, priority } = request.data;
-    
+
     // Encode header values to handle special characters
     const encodeHeaderValue = (value: string) => {
       // Use base64 encoding for non-ASCII characters
@@ -16,47 +66,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       return value;
     };
-    
+
     const headers: Record<string, string> = {
-      'Priority': priority?.toString() || '3',
+      Priority: priority?.toString() || '3',
     };
-    
+
     if (title) {
       headers['Title'] = encodeHeaderValue(title);
     }
-    
+
     if (iconUrl) {
       headers['Icon'] = iconUrl;
     }
-    
+
     if (clickUrl) {
       headers['Click'] = clickUrl;
     }
-    
+
     fetch(`https://ntfy.sh/${topic}`, {
       method: 'POST',
       body: body,
       headers: headers,
     })
-    .then(response => {
-      console.log('ntfy notification sent successfully');
-      sendResponse({ success: true, status: response.status });
-    })
-    .catch(error => {
-      console.error('Failed to send ntfy notification:', error);
-      sendResponse({ success: false, error: error.message });
-    });
-    
+      .then((response) => {
+        console.log('ntfy notification sent successfully');
+        sendResponse({ success: true, status: response.status });
+      })
+      .catch((error) => {
+        console.error('Failed to send ntfy notification:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+
     return true;
   }
 
   if (request.type === 'SEND_DISCORD_WEBHOOK') {
-    const { webhookUrl, username, content, iconUrl, timestamp } = request.data;
+    const { webhookUrl, username, content, iconUrl, timestamp, timestampISO } = request.data;
 
-    const embed = {
+    // Include formatted timestamp with seconds in the footer
+    const formattedTimestamp =
+      timestamp ||
+      new Date().toLocaleString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+
+    const embed: any = {
       title: username,
       description: content,
-      timestamp: new Date().toISOString(),
+      footer: {
+        text: formattedTimestamp,
+      },
       color: 0x3b5bdb, // Better-Snap brand color
     };
 
@@ -68,25 +133,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       embed['thumbnail'] = { url: iconUrl };
     }
 
-    fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
+    // Queue the webhook request with rate limiting
+    new Promise((resolve, reject) => {
+      webhookQueue.push({ webhookUrl, payload, resolve, reject });
+      processWebhookQueue();
     })
-      .then((response) => {
-        if (response.ok) {
-          console.log('Discord webhook sent successfully');
-          sendResponse({ success: true, status: response.status });
-        } else {
-          console.error('Failed to send Discord webhook:', response.status, response.statusText);
-          sendResponse({ success: false, error: `HTTP ${response.status}: ${response.statusText}` });
-        }
+      .then((result) => {
+        sendResponse(result);
       })
       .catch((error) => {
-        console.error('Failed to send Discord webhook:', error);
-        sendResponse({ success: false, error: error.message });
+        sendResponse(error);
       });
 
     return true;
