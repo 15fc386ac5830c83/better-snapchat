@@ -17,10 +17,6 @@ function getTimestamp(): string {
   });
 }
 
-function getTimestampISO(): string {
-  return new Date().toISOString();
-}
-
 const store = getSnapchatStore();
 
 let oldOnActiveConversationInfoUpdated: any = null;
@@ -112,7 +108,6 @@ function sendDiscordWebhook({
   const conversationTitle = conversation?.title ?? 'your Chat';
   const action = PresenceActionMap[presenceState](conversationTitle);
   const timestamp = getTimestamp();
-  const timestampISO = getTimestampISO();
 
   let iconUrl = undefined;
   if (bitmojiSelfieId != null && bitmojiAvatarId != null) {
@@ -135,7 +130,6 @@ function sendDiscordWebhook({
           content: action,
           iconUrl: iconUrl,
           timestamp: timestamp,
-          timestampISO: timestampISO,
         },
       },
     },
@@ -156,8 +150,12 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
 
   const currentlyPeekingUsers = new Set<string>();
   const currentlyTypingOrIdleUsers = new Set<string>();
+  const currentlyPresentUsers = new Set<string>(); // Track all users who are present
 
-  for (const [conversationId, { peekingParticipants, typingParticipants }] of activeConversationInfo.entries()) {
+  for (const [
+    conversationId,
+    { peekingParticipants, typingParticipants, presentParticipants },
+  ] of activeConversationInfo.entries()) {
     const conversation = getConversation(conversationId)?.conversation;
     const conversationTitle = conversation?.title ?? 'your Chat';
 
@@ -211,6 +209,7 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
       const previousState = userPresenceMap.get(serializedId);
 
       currentlyPeekingUsers.add(serializedId);
+      // Don't mark peeking users as present - they're not actually in the chat
 
       if (previousState === PresenceState.PEEKING) {
         continue;
@@ -218,7 +217,15 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
 
       if (presenceLoggingEnabled) {
         const action = PresenceActionMap[PresenceState.PEEKING](conversationTitle);
-        logInfo(`${user.display_name ?? user.username}:`, action);
+        const timestamp = getTimestamp();
+        logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+
+        sendDiscordWebhook({
+          user,
+          conversation,
+          conversationId,
+          presenceState: PresenceState.PEEKING,
+        });
       }
 
       if (halfSwipeNotificationEnabled) {
@@ -241,6 +248,11 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
       const previousState = userPresenceMap.get(serializedId);
 
       currentlyTypingOrIdleUsers.add(serializedId);
+      // Only mark as present if they're in presentParticipants (not just peeking)
+      const isInPresentParticipants = presentParticipants && presentParticipants.includes(userId);
+      if (isInPresentParticipants && !userPresenceTracking.get(serializedId)) {
+        userPresenceTracking.set(serializedId, true);
+      }
 
       if (previousState === presenceState) {
         continue;
@@ -248,10 +260,52 @@ async function handleOnActiveConversationInfoUpdated(activeConversationInfo: any
 
       if (presenceLoggingEnabled) {
         const action = PresenceActionMap[presenceState](conversationTitle);
-        logInfo(`${user.display_name ?? user.username}:`, action);
+        const timestamp = getTimestamp();
+        logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+
+        sendDiscordWebhook({
+          user,
+          conversation,
+          conversationId,
+          presenceState,
+        });
       }
 
       userPresenceMap.set(serializedId, presenceState);
+    }
+  }
+
+  // Check for users who left (were present but are no longer in presentParticipants)
+  for (const [serializedId, wasPresent] of userPresenceTracking.entries()) {
+    if (wasPresent && !currentlyPresentUsers.has(serializedId)) {
+      // Don't log "left" if user is currently peeking
+      if (currentlyPeekingUsers.has(serializedId)) {
+        continue;
+      }
+
+      // User left
+      userPresenceTracking.delete(serializedId);
+
+      if (presenceLoggingEnabled) {
+        const parts = serializedId.split(':');
+        if (parts[0] && parts[1]) {
+          const userId = parts[0];
+          const conversationId = parts[1] === 'direct' ? undefined : parts[1];
+          const user = await getSnapchatPublicUser(userId);
+          const conversation = conversationId ? getConversation(conversationId)?.conversation : null;
+          const conversationTitle = conversation?.title ?? 'your Chat';
+          const action = PresenceActionMap[PresenceState.LEFT](conversationTitle);
+          const timestamp = getTimestamp();
+          logInfo(`[${timestamp}] ${user.display_name ?? user.username}:`, action);
+
+          sendDiscordWebhook({
+            user,
+            conversation,
+            conversationId,
+            presenceState: PresenceState.LEFT,
+          });
+        }
+      }
     }
   }
 
